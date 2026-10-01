@@ -9,6 +9,18 @@ const DEFAULT_TAG = "horizon";
 // to mask its natural duration, which otherwise looks like a stall.
 const CONCURRENCY_LIMIT = 2;
 
+function graphErrorDetails(error) {
+  return {
+    name: error.name,
+    message: error.message,
+    status: error.status,
+    code: error.code,
+    requestId: error.requestId,
+    clientRequestId: error.clientRequestId,
+    requestPath: error.requestPath
+  };
+}
+
 async function graphGet(token, url, extraHeaders = {}, retriesLeft = 3) {
   const response = await fetch(url, {
     headers: {
@@ -24,7 +36,17 @@ async function graphGet(token, url, extraHeaders = {}, retriesLeft = 3) {
   }
 
   if (!response.ok) {
-    throw new Error(`Graph request failed (${response.status}): ${url}`);
+    const errorResponse = await response.json().catch(() => null);
+    const graphError = errorResponse?.error;
+    const errorMessage = graphError?.message || response.statusText;
+    const error = new Error(`Graph request failed (${response.status}): ${errorMessage}`);
+    error.status = response.status;
+    error.code = graphError?.code;
+    error.requestId = response.headers.get("request-id");
+    error.clientRequestId = response.headers.get("client-request-id");
+    const requestUrl = new URL(url);
+    error.requestPath = `${requestUrl.pathname}${requestUrl.search.replace(/contentBytes/gi, "contentBytes")}`;
+    throw error;
   }
 
   return response.json();
@@ -46,6 +68,154 @@ async function graphGetAllPages(token, initialUrl, extraHeaders = {}) {
 export async function getCalendars(token) {
   const url = `${GRAPH_BASE}/me/calendars?$select=id,name`;
   return graphGetAllPages(token, url);
+}
+
+function summarizeImageSource(source) {
+  const value = source.trim();
+  if (/^cid:/i.test(value)) {
+    return { scheme: "cid", contentId: value.replace(/^cid:/i, "").replace(/^<|>$/g, "") };
+  }
+  if (/^data:/i.test(value)) {
+    return { scheme: "data", contentType: value.slice(5).split(/[;,]/)[0] || "unknown" };
+  }
+
+  try {
+    const url = new URL(value, "https://horizon-image-diagnostics.invalid");
+    return {
+      scheme: url.protocol.slice(0, -1),
+      host: url.host,
+      path: url.pathname,
+      hasQuery: Boolean(url.search)
+    };
+  } catch {
+    return { scheme: "unparsed", characterCount: value.length };
+  }
+}
+
+function inspectImageMarkup(content) {
+  const body = new DOMParser().parseFromString(content || "", "text/html").body;
+  const candidates = Array.from(body.querySelectorAll("*")).filter((element) => {
+    const tagName = element.tagName.toLowerCase();
+    const style = element.getAttribute("style") || "";
+    return tagName === "img" || tagName.includes("imagedata") ||
+      element.hasAttribute("background") || /url\s*\(/i.test(style);
+  });
+
+  return candidates.map((element) => {
+    const sources = [];
+    for (const attribute of ["src", "srcset", "href", "data", "background"]) {
+      const value = element.getAttribute(attribute);
+      if (!value) continue;
+      const values = attribute === "srcset"
+        ? value.split(",").map((candidate) => candidate.trim().split(/\s+/)[0]).filter(Boolean)
+        : [value];
+      sources.push(...values.map((source) => ({ attribute, ...summarizeImageSource(source) })));
+    }
+
+    const style = element.getAttribute("style") || "";
+    for (const match of style.matchAll(/url\(\s*(['"]?)(.*?)\1\s*\)/gi)) {
+      sources.push({ attribute: "style-url", ...summarizeImageSource(match[2]) });
+    }
+
+    return {
+      tag: element.tagName.toLowerCase(),
+      sources,
+      width: element.getAttribute("width"),
+      height: element.getAttribute("height"),
+      hasAlt: element.hasAttribute("alt"),
+      altTextLength: element.getAttribute("alt")?.length || 0
+    };
+  });
+}
+
+export async function getEventDescription(token, calendarId, eventId) {
+  const eventUrl =
+    `${GRAPH_BASE}/me/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`;
+  const event = await graphGet(token, `${eventUrl}?$select=body`);
+  const inlineAttachments = [];
+  const imageDiagnostics = {
+    eventId,
+    calendarId,
+    bodyContentType: event.body?.contentType,
+    bodyCharacterCount: event.body?.content?.length || 0,
+    cidReferenceCount: (event.body?.content?.match(/\bcid:/gi) || []).length,
+    imageMarkup: inspectImageMarkup(event.body?.content || ""),
+    attachmentListQueried: false,
+    attachmentListCount: null,
+    attachmentList: [],
+    imageFetches: [],
+    attachmentListError: null
+  };
+
+  try {
+    imageDiagnostics.attachmentListQueried = true;
+    const attachmentsUrl =
+      `${eventUrl}/attachments?$select=id,name,contentType,isInline,size`;
+    const attachments = await graphGetAllPages(token, attachmentsUrl);
+    imageDiagnostics.attachmentListCount = attachments.length;
+    imageDiagnostics.attachmentList = attachments.map((attachment) => ({
+      id: attachment.id,
+      name: attachment.name,
+      contentType: attachment.contentType,
+      isInline: attachment.isInline,
+      size: attachment.size
+    }));
+    const inlineImages = attachments.filter(
+      (attachment) => attachment.isInline && attachment.contentType?.toLowerCase().startsWith("image/")
+    );
+
+    if (imageDiagnostics.cidReferenceCount === 0) {
+      imageDiagnostics.imageFetches = inlineImages.map((attachment) => ({
+        id: attachment.id,
+        name: attachment.name,
+        contentType: attachment.contentType,
+        isInline: attachment.isInline,
+        size: attachment.size,
+        outcome: "not fetched: body has no CID image reference"
+      }));
+    } else {
+      const imageResults = await Promise.allSettled(inlineImages.map(async (attachment) => {
+        const attachmentUrl =
+          `${eventUrl}/attachments/${encodeURIComponent(attachment.id)}`;
+        return { ...attachment, ...await graphGet(token, attachmentUrl) };
+      }));
+
+      imageResults.forEach((result, index) => {
+        const listedAttachment = inlineImages[index];
+        if (result.status === "fulfilled") {
+          const attachment = result.value;
+          inlineAttachments.push(attachment);
+          imageDiagnostics.imageFetches.push({
+            id: attachment.id,
+            name: attachment.name,
+            listedContentType: listedAttachment.contentType,
+            returnedContentType: attachment.contentType,
+            isInline: attachment.isInline,
+            size: attachment.size,
+            contentId: attachment.contentId,
+            contentBytesLength: attachment.contentBytes?.length || 0,
+            outcome: "fetched"
+          });
+        } else {
+          const failure = graphErrorDetails(result.reason);
+          imageDiagnostics.imageFetches.push({
+            id: listedAttachment.id,
+            name: listedAttachment.name,
+            listedContentType: listedAttachment.contentType,
+            isInline: listedAttachment.isInline,
+            size: listedAttachment.size,
+            outcome: "fetch failed",
+            error: failure
+          });
+        }
+      });
+    }
+  } catch (error) {
+    console.warn("Could not load event attachments:", error);
+    imageDiagnostics.attachmentListError = graphErrorDetails(error);
+  }
+
+  return { body: event.body, inlineAttachments, imageDiagnostics };
 }
 
 function hasHighlightCategory(categories, categoryNames) {
@@ -105,7 +275,7 @@ export async function getHighlightEvents(token, calendars, startISO, endISO, onP
         `${GRAPH_BASE}/me/calendars/${calendar.id}/calendarView` +
         `?startDateTime=${encodeURIComponent(startISO)}` +
         `&endDateTime=${encodeURIComponent(endISO)}` +
-        `&$select=subject,start,end,categories,location,isAllDay,bodyPreview` +
+        `&$select=id,subject,start,end,categories,location,isAllDay,bodyPreview` +
         `&$top=100`;
 
       const events = await graphGetAllPages(token, url, headers);
@@ -117,6 +287,8 @@ export async function getHighlightEvents(token, calendars, startISO, endISO, onP
             hasHighlightTag(event, normalizedTags)
         )
         .map((event) => ({
+          id: event.id,
+          calendarId: calendar.id,
           subject: stripMatchedTags(event.subject, normalizedTags),
           start: new Date(event.start.dateTime),
           end: new Date(event.end.dateTime),

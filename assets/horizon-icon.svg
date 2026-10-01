@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#2563eb"/>
+  <path fill="#fff" d="M84 62h76v388H84zM352 62h76v388h-76z"/>
+  <defs>
+    <clipPath id="above-horizon">
+      <rect width="512" height="256"/>
+    </clipPath>
+  </defs>
+  <circle cx="256" cy="256" r="82" fill="#ffd166" clip-path="url(#above-horizon)"/>
+  <path d="M66 256h380" fill="none" stroke="#d7e9ff" stroke-linecap="round" stroke-width="14"/>
+</svg>

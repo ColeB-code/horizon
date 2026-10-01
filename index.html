@@ -3,9 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Family Horizon</title>
+<title>Horizon</title>
 <link rel="manifest" href="manifest.json">
-<link rel="icon" href="assets/icon-192.png">
+<link rel="icon" type="image/svg+xml" href="assets/horizon-icon.svg">
+<link rel="apple-touch-icon" sizes="180x180" href="assets/horizon-icon-180.png">
 <link rel="stylesheet" href="css/styles.css">
 <script>
   // Apply saved theme before first paint to avoid a flash of the wrong theme.
@@ -17,7 +18,7 @@
 </head>
 <body>
   <header class="app-header">
-    <h1>Family Horizon</h1>
+    <h1>Horizon</h1>
     <div class="auth-controls">
       <button id="themeToggleBtn" class="btn btn-secondary" title="Toggle dark mode">&#9789;</button>
       <span id="userName" class="user-name"></span>
@@ -33,7 +34,7 @@
     </div>
 
     <section id="dashboard" hidden>
-      <h2>On the Horizon</h2>
+      <p id="currentDate" class="current-date"></p>
       <div id="eventGroups"></div>
 
       <div class="info-sections">
@@ -62,18 +63,22 @@
           <ul class="url-help">
             <li><code>?exclude=Name1,Name2</code>: skip the named calendar(s) (case-insensitive)</li>
             <li><code>?category=Name1,Name2</code>: also match events with any of these Outlook categories (case-insensitive, off by default)</li>
-            <li><code>?tags=word1,word2</code>: match events with any of these #hashtags in the subject/location/description (case-insensitive, defaults to <code>horizon</code>)</li>
+            <li><code>?tags=word1,word2</code>: match events with any of these #hashtags in the subject/location/description preview (case-insensitive, defaults to <code>horizon</code>)</li>
             <li><code>?length=N</code>: how many months ahead to look, any positive integer (defaults to 6)</li>
           </ul>
         </details>
 
-        <p id="processingTime" class="processing-time"></p>
+        <p class="processing-time">
+          <span id="loadSummary"></span>
+          <span id="cacheVersion" class="cache-version" title="cached.current"></span>
+        </p>
       </div>
     </section>
   </main>
 
   <!-- MSAL Browser UMD build -->
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.30.0/lib/msal-browser.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.16/dist/purify.min.js"></script>
 
   <script type="module" src="js/app.js"></script>
 </body>

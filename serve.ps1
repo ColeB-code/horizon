@@ -22,6 +22,7 @@ while ($listener.IsListening) {
             ".js"   { "application/javascript" }
             ".json" { "application/json" }
             ".png"  { "image/png" }
+            ".svg"  { "image/svg+xml" }
             default { "application/octet-stream" }
         }
         $context.Response.ContentType = $contentType

@@ -1,4 +1,4 @@
-const CACHE_NAME = "family-horizon-v30";
+const CACHE_NAME = "family-horizon-v63";
 const APP_SHELL = [
   "index.html",
   "css/styles.css",
@@ -6,8 +6,10 @@ const APP_SHELL = [
   "js/auth.js",
   "js/graph.js",
   "manifest.json",
-  "assets/icon-192.png",
-  "assets/icon-512.png"
+  "assets/horizon-icon.svg",
+  "assets/horizon-icon-180.png",
+  "assets/horizon-icon-192.png",
+  "assets/horizon-icon-512.png"
 ];
 
 self.addEventListener("install", (event) => {
@@ -28,6 +30,10 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
+
+  if (url.pathname.endsWith("/app-version.json")) {
+    return;
+  }
 
   // Never cache auth or live Graph API calls.
   if (url.origin.includes("microsoftonline.com") || url.origin.includes("graph.microsoft.com")) {
