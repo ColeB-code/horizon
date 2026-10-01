@@ -1,4 +1,4 @@
-const CACHE_NAME = "family-horizon-v29";
+const CACHE_NAME = "family-horizon-v30";
 const APP_SHELL = [
   "index.html",
   "css/styles.css",

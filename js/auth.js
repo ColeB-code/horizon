@@ -4,7 +4,9 @@ const msalConfig = {
   auth: {
     clientId: "4b498d6c-6c07-495d-b6fc-c31b001957ef",
     authority: "https://login.microsoftonline.com/consumers",
-    redirectUri: "http://localhost:5500"
+    redirectUri: window.location.hostname === "localhost"
+      ? window.location.origin
+      : `${window.location.origin}${window.location.pathname}`
   },
   cache: {
     cacheLocation: "localStorage",
